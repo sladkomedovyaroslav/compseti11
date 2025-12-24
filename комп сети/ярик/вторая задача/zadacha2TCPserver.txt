@@ -1,0 +1,82 @@
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
+#pragma warning(disable: 4996)
+
+#include <iostream>
+#include <winsock2.h>
+using namespace std;
+
+#pragma comment(lib, "ws2_32.lib")
+
+struct Student {
+    int id;
+    char name[50];
+    int grades[5];
+    char status[100];
+};
+
+void analyzeGrades(Student& s) {
+    bool hasTwo = false, hasThree = false;
+
+    for (int i = 0; i < 5; i++) {
+        if (s.grades[i] == 2) hasTwo = true;
+        else if (s.grades[i] == 3) hasThree = true;
+    }
+
+    if (hasTwo)
+        strcpy(s.status, "Отчислен за неудовлетворительные оценки");
+    else if (hasThree)
+        strcpy(s.status, "Обучается, но без стипендии");
+    else
+        strcpy(s.status, "Обучается. Назначена стипендия");
+}
+
+void printStudent(const Student& s) {
+    cout << "\nСтудент #" << s.id << "\nИмя: " << s.name << "\nОценки: ";
+    for (int g : s.grades) cout << g << " ";
+    cout << "\nСтатус: " << s.status << endl;
+}
+
+int main() {
+    WSADATA wsa;
+    SOCKET serverSocket, clientSocket;
+    sockaddr_in server{}, client{};
+    int clientSize = sizeof(client);
+
+    WSAStartup(MAKEWORD(2, 2), &wsa);
+
+    serverSocket = socket(AF_INET, SOCK_STREAM, 0);
+    server.sin_family = AF_INET;
+    server.sin_addr.s_addr = INADDR_ANY;
+    server.sin_port = htons(7777);
+
+    bind(serverSocket, (sockaddr*)&server, sizeof(server));
+    listen(serverSocket, 5);
+
+    cout << "Сервер деканата запущен на порту 7777..." << endl;
+
+    while (true) {
+        clientSocket = accept(serverSocket, (sockaddr*)&client, &clientSize);
+        cout << "Студент подключился\n";
+
+        while (true) {
+            Student s{};
+            int bytes = recv(clientSocket, (char*)&s, sizeof(s), 0);
+
+            if (bytes <= 0 || s.id == -1) {
+                cout << "Отключение клиента\n";
+                break;
+            }
+
+            analyzeGrades(s);
+            printStudent(s);
+
+            send(clientSocket, (char*)&s, sizeof(s), 0);
+        }
+
+        closesocket(clientSocket);
+    }
+
+    closesocket(serverSocket);
+    WSACleanup();
+    return 0;
+}

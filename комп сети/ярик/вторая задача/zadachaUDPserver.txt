@@ -1,0 +1,79 @@
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
+#pragma warning(disable: 4996)
+
+#include <iostream>
+#include <winsock2.h>
+
+#pragma comment(lib, "ws2_32.lib")
+using namespace std;
+
+// Структура студента
+struct Student {
+    int id;
+    char name[50];
+    int grades[5];
+    char status[100];
+};
+
+// Анализ оценок
+void analyzeGrades(Student& s) {
+    bool hasTwo = false;
+    bool hasThree = false;
+
+    for (int i = 0; i < 5; i++) {
+        if (s.grades[i] == 2) hasTwo = true;
+        else if (s.grades[i] == 3) hasThree = true;
+    }
+
+    if (hasTwo)
+        strcpy(s.status, "Отчислен (есть неудовлетворительная оценка)");
+    else if (hasThree)
+        strcpy(s.status, "Обучается, но без стипендии");
+    else
+        strcpy(s.status, "Обучается. Назначена стипендия");
+}
+
+void printStudent(const Student& s) {
+    cout << "\nСтудент: " << s.name << "\nОценки: ";
+    for (int g : s.grades) cout << g << " ";
+    cout << "\nРешение деканата: " << s.status << endl;
+}
+
+int main() {
+    WSADATA wsa;
+    SOCKET serverSocket;
+    sockaddr_in serverAddr{}, clientAddr{};
+    int clientSize = sizeof(clientAddr);
+
+    WSAStartup(MAKEWORD(2, 2), &wsa);
+
+    // Создание UDP-сокета
+    serverSocket = socket(AF_INET, SOCK_DGRAM, 0);
+
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_addr.s_addr = INADDR_ANY;
+    serverAddr.sin_port = htons(8888);
+
+    bind(serverSocket, (sockaddr*)&serverAddr, sizeof(serverAddr));
+
+    cout << "UDP сервер деканата запущен...\n";
+
+    while (true) {
+        Student student{};
+
+        // Получение данных от клиента
+        recvfrom(serverSocket, (char*)&student, sizeof(student), 0,
+                 (sockaddr*)&clientAddr, &clientSize);
+
+        analyzeGrades(student);
+        printStudent(student);
+
+        // Эхо-ответ с обработанными данными
+        sendto(serverSocket, (char*)&student, sizeof(student), 0,
+               (sockaddr*)&clientAddr, clientSize);
+    }
+
+    closesocket(serverSocket);
+    WSACleanup();
+    return 0;
+}

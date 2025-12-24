@@ -1,0 +1,79 @@
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
+#pragma warning(disable: 4996)
+
+#include <iostream>
+#include <winsock2.h>
+
+#pragma comment(lib, "ws2_32.lib")
+using namespace std;
+
+// Информация о студенте
+struct StudentInfo {
+    int studentId;
+    char fullName[50];
+    int marks[5];
+    char decision[120];
+};
+
+// Функция принятия решения деканатом
+void makeDecision(StudentInfo& info) {
+    bool badMark = false;
+    bool satisfactory = false;
+
+    for (int i = 0; i < 5; ++i) {
+        if (info.marks[i] == 2)
+            badMark = true;
+        else if (info.marks[i] == 3)
+            satisfactory = true;
+    }
+
+    if (badMark)
+        strcpy(info.decision, "Решение: студент отчислен");
+    else if (satisfactory)
+        strcpy(info.decision, "Решение: обучение без стипендии");
+    else
+        strcpy(info.decision, "Решение: назначена стипендия");
+}
+
+void showOnServer(const StudentInfo& info) {
+    cout << "\nПолучены данные:\n";
+    cout << "ФИО: " << info.fullName << "\nОценки: ";
+    for (int i = 0; i < 5; i++) cout << info.marks[i] << " ";
+    cout << "\n" << info.decision << endl;
+}
+
+int main() {
+    WSADATA wsaData;
+    SOCKET udpSocket;
+    sockaddr_in serverAddr{}, clientAddr{};
+    int clientLen = sizeof(clientAddr);
+
+    WSAStartup(MAKEWORD(2, 2), &wsaData);
+
+    udpSocket = socket(AF_INET, SOCK_DGRAM, 0);
+
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_addr.s_addr = INADDR_ANY;
+    serverAddr.sin_port = htons(9000);
+
+    bind(udpSocket, (sockaddr*)&serverAddr, sizeof(serverAddr));
+
+    cout << "UDP сервер деканата готов к приему данных...\n";
+
+    while (true) {
+        StudentInfo student{};
+
+        recvfrom(udpSocket, (char*)&student, sizeof(student), 0,
+                 (sockaddr*)&clientAddr, &clientLen);
+
+        makeDecision(student);
+        showOnServer(student);
+
+        sendto(udpSocket, (char*)&student, sizeof(student), 0,
+               (sockaddr*)&clientAddr, clientLen);
+    }
+
+    closesocket(udpSocket);
+    WSACleanup();
+    return 0;
+}

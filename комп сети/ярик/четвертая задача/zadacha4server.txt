@@ -1,0 +1,121 @@
+#include <iostream>
+#include <string>
+
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
+#include <WinSock2.h>
+#include <Windows.h>
+#pragma comment(lib, "Ws2_32.lib")
+
+using namespace std;
+
+#define LISTENPORT 666
+
+// ===== Структуры =====
+struct Student {
+    char fam[20];
+    int vals[4];
+};
+
+struct Message {
+    int type;
+    char message[256];
+    Student st;
+};
+
+// ===== Глобальные данные =====
+int nClients = 0;
+
+// Критическая секция для счетчика клиентов
+CRITICAL_SECTION csClients;
+
+// Мьютекс для вывода в консоль
+HANDLE hMutexConsole;
+
+// ===== Функция вывода клиентов =====
+void printUsers() {
+    EnterCriticalSection(&csClients);
+    cout << "Клиентов онлайн: " << nClients << endl << endl;
+    LeaveCriticalSection(&csClients);
+}
+
+// ===== Поток обслуживания клиента =====
+DWORD WINAPI ClientThread(LPVOID lpParam) {
+    SOCKET clientSocket = *(SOCKET*)lpParam;
+    delete (SOCKET*)lpParam;
+
+    Message msg;
+    char hello[] = "Сервер подключен\r\n";
+    send(clientSocket, hello, strlen(hello), 0);
+
+    while (recv(clientSocket, (char*)&msg, sizeof(msg), 0) > 0) {
+        WaitForSingleObject(hMutexConsole, INFINITE);
+
+        if (msg.type == 1) {
+            cout << "Сообщение: " << msg.message << endl;
+            ReleaseMutex(hMutexConsole);
+
+            send(clientSocket, msg.message, strlen(msg.message), 0);
+        }
+
+        if (msg.type == 2) {
+            Student s = msg.st;
+            cout << "Студент: " << s.fam << endl;
+
+            int minVal = 5;
+            for (int i = 0; i < 4; i++)
+                minVal = min(minVal, s.vals[i]);
+
+            string result;
+            if (minVal <= 2) result = "Есть задолженности";
+            else if (minVal == 3) result = "Без стипендии";
+            else if (minVal == 4) result = "Стипендия 1500";
+            else result = "Стипендия 2200";
+
+            ReleaseMutex(hMutexConsole);
+            send(clientSocket, result.c_str(), result.length(), 0);
+        }
+    }
+
+    EnterCriticalSection(&csClients);
+    nClients--;
+    LeaveCriticalSection(&csClients);
+
+    printUsers();
+    closesocket(clientSocket);
+    return 0;
+}
+
+int main() {
+    setlocale(LC_ALL, "rus");
+
+    WSADATA ws;
+    WSAStartup(MAKEWORD(2, 2), &ws);
+
+    InitializeCriticalSection(&csClients);
+    hMutexConsole = CreateMutex(NULL, FALSE, NULL);
+
+    SOCKET sListener = socket(AF_INET, SOCK_STREAM, 0);
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(LISTENPORT);
+    addr.sin_addr.s_addr = INADDR_ANY;
+
+    bind(sListener, (sockaddr*)&addr, sizeof(addr));
+    listen(sListener, SOMAXCONN);
+
+    cout << "Сервер запущен...\n";
+
+    while (true) {
+        SOCKET* client = new SOCKET;
+        *client = accept(sListener, NULL, NULL);
+
+        EnterCriticalSection(&csClients);
+        nClients++;
+        LeaveCriticalSection(&csClients);
+
+        printUsers();
+
+        CreateThread(NULL, 0, ClientThread, client, 0, NULL);
+    }
+}

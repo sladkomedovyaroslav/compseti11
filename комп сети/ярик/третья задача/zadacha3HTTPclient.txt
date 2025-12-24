@@ -1,0 +1,89 @@
+#pragma warning(disable: 4996)
+#include <iostream>
+#include <string>
+
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
+#include <WinSock2.h>
+#include <WS2tcpip.h>
+
+#pragma comment(lib, "Ws2_32.lib")
+
+#define BUF_SIZE 4096
+
+using namespace std;
+
+// Формирование HTTP GET запроса
+string buildGetRequest(const string& host, const string& path = "/") {
+    return "GET " + path + " HTTP/1.1\r\n"
+           "Host: " + host + "\r\n"
+           "Connection: close\r\n\r\n";
+}
+
+// Отправка HTTP запроса
+void httpRequest(const string& host, int port) {
+    SOCKET sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock == INVALID_SOCKET) {
+        cout << "Socket creation failed\n";
+        return;
+    }
+
+    hostent* h = gethostbyname(host.c_str());
+    if (!h) {
+        cout << "Host resolution failed\n";
+        closesocket(sock);
+        return;
+    }
+
+    sockaddr_in server{};
+    server.sin_family = AF_INET;
+    server.sin_port = htons(port);
+    server.sin_addr.s_addr = *(u_long*)h->h_addr;
+
+    cout << "Connecting to " << host << ":" << port << "...\n";
+    if (connect(sock, (sockaddr*)&server, sizeof(server)) == SOCKET_ERROR) {
+        cout << "Connection error\n";
+        closesocket(sock);
+        return;
+    }
+
+    string request = buildGetRequest(host);
+    send(sock, request.c_str(), request.length(), 0);
+
+    cout << "\n===== SERVER RESPONSE =====\n";
+    char buffer[BUF_SIZE];
+    int bytes;
+
+    while ((bytes = recv(sock, buffer, BUF_SIZE - 1, 0)) > 0) {
+        buffer[bytes] = '\0';
+        cout << buffer;
+    }
+
+    cout << "\n===== END RESPONSE =====\n";
+    closesocket(sock);
+}
+
+int main() {
+    WSADATA wsa;
+    WSAStartup(MAKEWORD(2, 2), &wsa);
+
+    while (true) {
+        cout << "\n1 - localhost:8000\n";
+        cout << "2 - json.org\n";
+        cout << "3 - library.ru\n";
+        cout << "0 - exit\n";
+        cout << "Choice: ";
+
+        int cmd;
+        cin >> cmd;
+
+        if (cmd == 0) break;
+
+        if (cmd == 1) httpRequest("localhost", 8000);
+        else if (cmd == 2) httpRequest("json.org", 80);
+        else if (cmd == 3) httpRequest("library.ru", 80);
+        else cout << "Invalid choice\n";
+    }
+
+    WSACleanup();
+    return 0;
+}

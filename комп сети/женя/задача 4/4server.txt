@@ -1,0 +1,111 @@
+#include <iostream>
+#include <winsock2.h>
+#include <windows.h>
+#pragma comment(lib, "Ws2_32.lib")
+
+using namespace std;
+
+#define SERVER_PORT 666
+
+// ===== Структуры данных =====
+struct StudentData {
+    char surname[20];
+    int marks[4];
+};
+
+struct Packet {
+    int mode;
+    char text[256];
+    StudentData student;
+};
+
+// ===== Глобальные ресурсы =====
+int activeClients = 0;
+CRITICAL_SECTION csCounter;
+HANDLE consoleMutex;
+
+// ===== Вывод состояния сервера =====
+void showClientCount() {
+    EnterCriticalSection(&csCounter);
+    cout << "[Сервер] Подключено клиентов: " << activeClients << endl;
+    LeaveCriticalSection(&csCounter);
+}
+
+// ===== Поток клиента =====
+DWORD WINAPI ClientHandler(LPVOID param) {
+    SOCKET sock = *(SOCKET*)param;
+    delete (SOCKET*)param;
+
+    Packet packet;
+    const char welcome[] = "Соединение установлено\r\n";
+    send(sock, welcome, strlen(welcome), 0);
+
+    while (recv(sock, (char*)&packet, sizeof(packet), 0) > 0) {
+        WaitForSingleObject(consoleMutex, INFINITE);
+
+        if (packet.mode == 1) {
+            cout << "[Эхо] " << packet.text << endl;
+            ReleaseMutex(consoleMutex);
+            send(sock, packet.text, strlen(packet.text), 0);
+        }
+        else if (packet.mode == 2) {
+            StudentData s = packet.student;
+            cout << "[Деканат] " << s.surname << endl;
+
+            int minMark = 5;
+            for (int i = 0; i < 4; i++)
+                minMark = min(minMark, s.marks[i]);
+
+            string reply;
+            if (minMark <= 2) reply = "Задолженность";
+            else if (minMark == 3) reply = "Без стипендии";
+            else if (minMark == 4) reply = "Стипендия 1500";
+            else reply = "Стипендия 2200";
+
+            ReleaseMutex(consoleMutex);
+            send(sock, reply.c_str(), reply.size(), 0);
+        }
+    }
+
+    EnterCriticalSection(&csCounter);
+    activeClients--;
+    LeaveCriticalSection(&csCounter);
+
+    showClientCount();
+    closesocket(sock);
+    return 0;
+}
+
+int main() {
+    setlocale(LC_ALL, "rus");
+
+    WSADATA wsa;
+    WSAStartup(MAKEWORD(2, 2), &wsa);
+
+    InitializeCriticalSection(&csCounter);
+    consoleMutex = CreateMutex(nullptr, FALSE, nullptr);
+
+    SOCKET serverSocket = socket(AF_INET, SOCK_STREAM, 0);
+
+    sockaddr_in serverAddr{};
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_port = htons(SERVER_PORT);
+    serverAddr.sin_addr.s_addr = INADDR_ANY;
+
+    bind(serverSocket, (sockaddr*)&serverAddr, sizeof(serverAddr));
+    listen(serverSocket, SOMAXCONN);
+
+    cout << "Сервер запущен и ожидает подключения...\n";
+
+    while (true) {
+        SOCKET* clientSock = new SOCKET;
+        *clientSock = accept(serverSocket, nullptr, nullptr);
+
+        EnterCriticalSection(&csCounter);
+        activeClients++;
+        LeaveCriticalSection(&csCounter);
+
+        showClientCount();
+        CreateThread(nullptr, 0, ClientHandler, clientSock, 0, nullptr);
+    }
+}

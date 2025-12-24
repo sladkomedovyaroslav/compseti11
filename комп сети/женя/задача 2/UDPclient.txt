@@ -1,0 +1,70 @@
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
+#pragma warning(disable: 4996)
+
+#include <iostream>
+#include <winsock2.h>
+
+#pragma comment(lib, "ws2_32.lib")
+using namespace std;
+
+struct StudentInfo {
+    int studentId;
+    char fullName[50];
+    int marks[5];
+    char decision[120];
+};
+
+void showResult(const StudentInfo& info) {
+    cout << "\nОтвет деканата:\n";
+    cout << info.decision << endl;
+    cout << "---------------------------\n";
+}
+
+int main() {
+    WSADATA wsaData;
+    SOCKET udpSocket;
+    sockaddr_in deaneryAddr{};
+    int addrSize = sizeof(deaneryAddr);
+
+    WSAStartup(MAKEWORD(2, 2), &wsaData);
+    udpSocket = socket(AF_INET, SOCK_DGRAM, 0);
+
+    deaneryAddr.sin_family = AF_INET;
+    deaneryAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    deaneryAddr.sin_port = htons(9000);
+
+    int counter = 1;
+    string nameInput;
+
+    cout << "Клиент студента (UDP) запущен\n";
+
+    while (true) {
+        StudentInfo student{};
+        student.studentId = counter++;
+
+        cout << "\nВведите ФИО студента (exit для выхода): ";
+        getline(cin, nameInput);
+        if (nameInput == "exit") break;
+
+        strcpy(student.fullName, nameInput.c_str());
+
+        cout << "Введите 5 оценок:\n";
+        for (int i = 0; i < 5; i++) {
+            cout << "Оценка " << i + 1 << ": ";
+            cin >> student.marks[i];
+        }
+        cin.ignore();
+
+        sendto(udpSocket, (char*)&student, sizeof(student), 0,
+               (sockaddr*)&deaneryAddr, addrSize);
+
+        recvfrom(udpSocket, (char*)&student, sizeof(student), 0,
+                 (sockaddr*)&deaneryAddr, &addrSize);
+
+        showResult(student);
+    }
+
+    closesocket(udpSocket);
+    WSACleanup();
+    return 0;
+}

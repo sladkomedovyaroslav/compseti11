@@ -1,0 +1,56 @@
+#include <iostream>
+#include <string>
+
+#define _WIN32_WINNT 0x501
+#include <WinSock2.h>
+#include <WS2tcpip.h>
+
+#pragma comment(lib, "Ws2_32.lib")
+
+using namespace std;
+
+int main() {
+    WSADATA wsa;
+    WSAStartup(MAKEWORD(2, 2), &wsa);
+
+    SOCKET server = socket(AF_INET, SOCK_STREAM, 0);
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(8000);
+    addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+    bind(server, (sockaddr*)&addr, sizeof(addr));
+    listen(server, SOMAXCONN);
+
+    cout << "HTTP Server running at http://localhost:8000\n";
+
+    while (true) {
+        sockaddr_in client{};
+        int size = sizeof(client);
+        SOCKET sock = accept(server, (sockaddr*)&client, &size);
+
+        char buffer[1024];
+        int len = recv(sock, buffer, sizeof(buffer) - 1, 0);
+        buffer[len] = '\0';
+
+        string html =
+            "<html><body>"
+            "<h2>Simple C++ HTTP Server</h2>"
+            "<pre>" + string(buffer) + "</pre>"
+            "</body></html>";
+
+        string response =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/html; charset=utf-8\r\n"
+            "Content-Length: " + to_string(html.length()) + "\r\n\r\n" +
+            html;
+
+        send(sock, response.c_str(), response.length(), 0);
+        closesocket(sock);
+    }
+
+    closesocket(server);
+    WSACleanup();
+    return 0;
+}

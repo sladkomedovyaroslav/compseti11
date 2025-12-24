@@ -1,0 +1,88 @@
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
+#pragma warning(disable: 4996)
+
+#include <iostream>
+#include <winsock2.h>
+
+#pragma comment(lib, "ws2_32.lib")
+using namespace std;
+
+// Данные студента
+struct StudentInfo {
+    int studentId;
+    char fullName[50];
+    int marks[5];
+    char decision[120];
+};
+
+// Логика деканата
+void processStudent(StudentInfo& st) {
+    bool hasFail = false;
+    bool hasSatisfactory = false;
+
+    for (int i = 0; i < 5; i++) {
+        if (st.marks[i] == 2)
+            hasFail = true;
+        else if (st.marks[i] == 3)
+            hasSatisfactory = true;
+    }
+
+    if (hasFail)
+        strcpy(st.decision, "Студент отчислен");
+    else if (hasSatisfactory)
+        strcpy(st.decision, "Стипендия не назначена");
+    else
+        strcpy(st.decision, "Назначена стипендия");
+}
+
+void logStudent(const StudentInfo& st) {
+    cout << "\nПринят студент: " << st.fullName << "\nОценки: ";
+    for (int i = 0; i < 5; i++) cout << st.marks[i] << " ";
+    cout << "\nРешение: " << st.decision << endl;
+}
+
+int main() {
+    WSADATA wsa;
+    SOCKET listenSocket, clientSocket;
+    sockaddr_in serverAddr{}, clientAddr{};
+    int clientSize = sizeof(clientAddr);
+
+    WSAStartup(MAKEWORD(2, 2), &wsa);
+
+    listenSocket = socket(AF_INET, SOCK_STREAM, 0);
+
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_addr.s_addr = INADDR_ANY;
+    serverAddr.sin_port = htons(8000);
+
+    bind(listenSocket, (sockaddr*)&serverAddr, sizeof(serverAddr));
+    listen(listenSocket, 5);
+
+    cout << "TCP сервер деканата запущен...\n";
+
+    while (true) {
+        clientSocket = accept(listenSocket, (sockaddr*)&clientAddr, &clientSize);
+        cout << "Подключился клиент\n";
+
+        while (true) {
+            StudentInfo student{};
+            int received = recv(clientSocket, (char*)&student, sizeof(student), 0);
+
+            if (received <= 0 || student.studentId == -1) {
+                cout << "Клиент отключился\n";
+                break;
+            }
+
+            processStudent(student);
+            logStudent(student);
+
+            send(clientSocket, (char*)&student, sizeof(student), 0);
+        }
+
+        closesocket(clientSocket);
+    }
+
+    closesocket(listenSocket);
+    WSACleanup();
+    return 0;
+}

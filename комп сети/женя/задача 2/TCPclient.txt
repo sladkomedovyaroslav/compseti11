@@ -1,0 +1,75 @@
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
+#pragma warning(disable: 4996)
+
+#include <iostream>
+#include <winsock2.h>
+
+#pragma comment(lib, "ws2_32.lib")
+using namespace std;
+
+struct StudentInfo {
+    int studentId;
+    char fullName[50];
+    int marks[5];
+    char decision[120];
+};
+
+void showDecision(const StudentInfo& st) {
+    cout << "\nОтвет деканата:\n";
+    cout << st.decision << endl;
+    cout << "--------------------------\n";
+}
+
+int main() {
+    WSADATA wsa;
+    SOCKET clientSocket;
+    sockaddr_in serverAddr{};
+
+    WSAStartup(MAKEWORD(2, 2), &wsa);
+    clientSocket = socket(AF_INET, SOCK_STREAM, 0);
+
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    serverAddr.sin_port = htons(8000);
+
+    if (connect(clientSocket, (sockaddr*)&serverAddr, sizeof(serverAddr)) == SOCKET_ERROR) {
+        cout << "Ошибка подключения к серверу\n";
+        return 1;
+    }
+
+    cout << "Соединение с деканатом установлено\n";
+
+    int idCounter = 1;
+    string input;
+
+    while (true) {
+        StudentInfo student{};
+        student.studentId = idCounter++;
+
+        cout << "\nВведите ФИО студента (exit для выхода): ";
+        getline(cin, input);
+        if (input == "exit") {
+            student.studentId = -1;
+            send(clientSocket, (char*)&student, sizeof(student), 0);
+            break;
+        }
+
+        strcpy(student.fullName, input.c_str());
+
+        cout << "Введите 5 оценок:\n";
+        for (int i = 0; i < 5; i++) {
+            cout << "Оценка " << i + 1 << ": ";
+            cin >> student.marks[i];
+        }
+        cin.ignore();
+
+        send(clientSocket, (char*)&student, sizeof(student), 0);
+
+        recv(clientSocket, (char*)&student, sizeof(student), 0);
+        showDecision(student);
+    }
+
+    closesocket(clientSocket);
+    WSACleanup();
+    return 0;
+}

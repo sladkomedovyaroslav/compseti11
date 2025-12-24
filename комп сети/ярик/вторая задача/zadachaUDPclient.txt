@@ -1,0 +1,75 @@
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
+#pragma warning(disable: 4996)
+
+#include <iostream>
+#include <winsock2.h>
+
+#pragma comment(lib, "ws2_32.lib")
+using namespace std;
+
+struct Student {
+    int id;
+    char name[50];
+    int grades[5];
+    char status[100];
+};
+
+void printResult(const Student& s) {
+    cout << "\nОтвет деканата:\n";
+    cout << "Студент: " << s.name << endl;
+    cout << "Статус: " << s.status << endl;
+    cout << "--------------------------\n";
+}
+
+int main() {
+    WSADATA wsa;
+    SOCKET clientSocket;
+    sockaddr_in serverAddr{};
+    int serverSize = sizeof(serverAddr);
+
+    WSAStartup(MAKEWORD(2, 2), &wsa);
+
+    // Создание UDP-сокета
+    clientSocket = socket(AF_INET, SOCK_DGRAM, 0);
+
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1"); // IP сервера
+    serverAddr.sin_port = htons(8888);
+
+    int id = 1;
+    string input;
+
+    cout << "UDP клиент студента запущен\n";
+
+    while (true) {
+        Student student{};
+        student.id = id++;
+
+        cout << "\nВведите имя студента (exit для выхода): ";
+        getline(cin, input);
+        if (input == "exit") break;
+
+        strcpy(student.name, input.c_str());
+
+        cout << "Введите 5 оценок:\n";
+        for (int i = 0; i < 5; i++) {
+            cout << "Оценка " << i + 1 << ": ";
+            cin >> student.grades[i];
+        }
+        cin.ignore();
+
+        // Отправка данных
+        sendto(clientSocket, (char*)&student, sizeof(student), 0,
+               (sockaddr*)&serverAddr, serverSize);
+
+        // Получение ответа
+        recvfrom(clientSocket, (char*)&student, sizeof(student), 0,
+                 (sockaddr*)&serverAddr, &serverSize);
+
+        printResult(student);
+    }
+
+    closesocket(clientSocket);
+    WSACleanup();
+    return 0;
+}

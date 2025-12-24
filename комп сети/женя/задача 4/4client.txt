@@ -1,0 +1,62 @@
+#include <iostream>
+#include <winsock2.h>
+#include <windows.h>
+#pragma comment(lib, "Ws2_32.lib")
+
+using namespace std;
+
+#define SERVER_IP "127.0.0.1"
+#define SERVER_PORT 666
+
+struct StudentData {
+    char surname[20];
+    int marks[4];
+};
+
+struct Packet {
+    int mode;
+    char text[256];
+    StudentData student;
+};
+
+int main() {
+    setlocale(LC_ALL, "rus");
+
+    WSADATA wsa;
+    WSAStartup(MAKEWORD(2, 2), &wsa);
+
+    SOCKET sock = socket(AF_INET, SOCK_STREAM, 0);
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(SERVER_PORT);
+    addr.sin_addr.s_addr = inet_addr(SERVER_IP);
+
+    connect(sock, (sockaddr*)&addr, sizeof(addr));
+
+    Packet packet{};
+    cout << "Выберите режим:\n1 — Эхо\n2 — Деканат\n";
+    cin >> packet.mode;
+    cin.ignore();
+
+    if (packet.mode == 1) {
+        cout << "Введите текст: ";
+        cin.getline(packet.text, 256);
+    }
+    else {
+        cout << "Фамилия студента: ";
+        cin.getline(packet.student.surname, 20);
+        cout << "Введите 4 оценки: ";
+        for (int i = 0; i < 4; i++)
+            cin >> packet.student.marks[i];
+    }
+
+    send(sock, (char*)&packet, sizeof(packet), 0);
+
+    char response[256]{};
+    recv(sock, response, sizeof(response), 0);
+    cout << "Ответ сервера: " << response << endl;
+
+    closesocket(sock);
+    WSACleanup();
+}
