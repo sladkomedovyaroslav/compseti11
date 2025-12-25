@@ -10,20 +10,23 @@ using namespace std;
 
 #define SRV_ADDR "127.0.0.1"
 #define SRV_PORT 666
-
+#include <clocale>
+// ===== Структуры =====
 struct Student {
     char fam[20];
     int vals[4];
 };
 
 struct Message {
-    int type;
-    char message[256];
-    Student st;
+    int type;              // 1 - эхо, 2 - деканат
+    char message[256];     // сообщение для эхо
+    Student st;            // данные студента
 };
 
 int main() {
     setlocale(LC_ALL, "rus");
+    SetConsoleCP(1251);
+    SetConsoleOutputCP(1251);
 
     WSADATA ws;
     WSAStartup(MAKEWORD(2, 2), &ws);
@@ -35,29 +38,46 @@ int main() {
     addr.sin_port = htons(SRV_PORT);
     addr.sin_addr.s_addr = inet_addr(SRV_ADDR);
 
-    connect(s, (sockaddr*)&addr, sizeof(addr));
+    if (connect(s, (sockaddr*)&addr, sizeof(addr)) != 0) {
+        cout << "Ошибка подключения к серверу\n";
+        return 1;
+    }
 
-    Message msg;
-    cout << "1 - Эхо\n2 - Деканат\n";
+    Message msg{};
+    cout << "1 - Эхо\n2 - Деканат\nВыбор: ";
     cin >> msg.type;
     cin.ignore();
 
     if (msg.type == 1) {
         cout << "Введите сообщение: ";
         cin.getline(msg.message, 256);
-    } else {
+    }
+    else if (msg.type == 2) {
         cout << "Фамилия: ";
         cin.getline(msg.st.fam, 20);
-        cout << "4 оценки: ";
-        for (int i = 0; i < 4; i++) cin >> msg.st.vals[i];
+        cout << "Введите 4 оценки: ";
+        for (int i = 0; i < 4; i++)
+            cin >> msg.st.vals[i];
+    }
+    else {
+        cout << "Неверный тип запроса\n";
+        closesocket(s);
+        WSACleanup();
+        return 0;
     }
 
+    // Отправка структуры серверу
     send(s, (char*)&msg, sizeof(msg), 0);
 
-    char buf[256];
-    recv(s, buf, sizeof(buf), 0);
-    cout << "Ответ сервера: " << buf << endl;
+    // Прием ответа сервера
+    char buf[256]{};
+    int bytes = recv(s, buf, sizeof(buf) - 1, 0);
+    if (bytes > 0) {
+        buf[bytes] = '\0';
+        cout << "Ответ сервера: " << buf << endl;
+    }
 
     closesocket(s);
     WSACleanup();
+    return 0;
 }
