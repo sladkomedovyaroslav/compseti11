@@ -1,6 +1,8 @@
 #include <iostream>
 #include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
+
 #pragma comment(lib, "Ws2_32.lib")
 
 using namespace std;
@@ -8,34 +10,71 @@ using namespace std;
 #define SERVER_IP "127.0.0.1"
 #define SERVER_PORT 666
 
+// ===== Структуры данных =====
 struct StudentData {
     char surname[20];
     int marks[4];
 };
 
 struct Packet {
-    int mode;
+    int mode;               // 1 — эхо, 2 — деканат
     char text[256];
     StudentData student;
 };
 
 int main() {
     setlocale(LC_ALL, "rus");
+    SetConsoleCP(1251);
+    SetConsoleOutputCP(1251);
 
+    cout << "=== Клиент запущен ===\n";
+
+    // ===== Инициализация WinSock =====
     WSADATA wsa;
-    WSAStartup(MAKEWORD(2, 2), &wsa);
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+        cout << "Ошибка WSAStartup\n";
+        system("pause");
+        return 1;
+    }
 
+    // ===== Создание сокета =====
     SOCKET sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock == INVALID_SOCKET) {
+        cout << "Ошибка создания сокета\n";
+        WSACleanup();
+        system("pause");
+        return 1;
+    }
 
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(SERVER_PORT);
-    addr.sin_addr.s_addr = inet_addr(SERVER_IP);
+    // ===== Адрес сервера =====
+    sockaddr_in serverAddr{};
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_port = htons(SERVER_PORT);
 
-    connect(sock, (sockaddr*)&addr, sizeof(addr));
+    // ВАЖНО: используем InetPtonA (ANSI-версия)
+    if (InetPtonA(AF_INET, SERVER_IP, &serverAddr.sin_addr) != 1) {
+        cout << "Ошибка преобразования IP-адреса\n";
+        closesocket(sock);
+        WSACleanup();
+        system("pause");
+        return 1;
+    }
 
+    // ===== Подключение =====
+    cout << "Подключение к серверу...\n";
+    if (connect(sock, (sockaddr*)&serverAddr, sizeof(serverAddr)) != 0) {
+        cout << "Ошибка connect(): " << WSAGetLastError() << endl;
+        closesocket(sock);
+        WSACleanup();
+        system("pause");
+        return 1;
+    }
+
+    cout << "Соединение установлено!\n";
+
+    // ===== Формирование пакета =====
     Packet packet{};
-    cout << "Выберите режим:\n1 — Эхо\n2 — Деканат\n";
+    cout << "\nВыберите режим:\n1 — Эхо\n2 — Деканат\n> ";
     cin >> packet.mode;
     cin.ignore();
 
@@ -43,20 +82,40 @@ int main() {
         cout << "Введите текст: ";
         cin.getline(packet.text, 256);
     }
-    else {
+    else if (packet.mode == 2) {
         cout << "Фамилия студента: ";
         cin.getline(packet.student.surname, 20);
         cout << "Введите 4 оценки: ";
         for (int i = 0; i < 4; i++)
             cin >> packet.student.marks[i];
     }
+    else {
+        cout << "Неверный режим\n";
+        closesocket(sock);
+        WSACleanup();
+        system("pause");
+        return 0;
+    }
 
+    // ===== Отправка пакета =====
     send(sock, (char*)&packet, sizeof(packet), 0);
 
+    // ===== Приём ответа =====
     char response[256]{};
-    recv(sock, response, sizeof(response), 0);
-    cout << "Ответ сервера: " << response << endl;
+    int bytesReceived = recv(sock, response, sizeof(response), 0);
 
+    if (bytesReceived > 0) {
+        cout << "\nОтвет сервера: " << response << endl;
+    }
+    else {
+        cout << "Ответ от сервера не получен\n";
+    }
+
+    // ===== Завершение работы =====
     closesocket(sock);
     WSACleanup();
+
+    system("pause");
+    return 0;
 }
+
