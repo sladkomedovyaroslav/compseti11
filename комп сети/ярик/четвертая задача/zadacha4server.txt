@@ -9,6 +9,7 @@
 using namespace std;
 
 #define LISTENPORT 666
+#include <clocale>
 
 // ===== Структуры =====
 struct Student {
@@ -28,38 +29,41 @@ int nClients = 0;
 // Критическая секция для счетчика клиентов
 CRITICAL_SECTION csClients;
 
-// Мьютекс для вывода в консоль
+// Мьютекс для консоли
 HANDLE hMutexConsole;
 
-// ===== Функция вывода клиентов =====
+// ===== Вывод количества клиентов =====
 void printUsers() {
     EnterCriticalSection(&csClients);
     cout << "Клиентов онлайн: " << nClients << endl << endl;
     LeaveCriticalSection(&csClients);
 }
 
-// ===== Поток обслуживания клиента =====
+// ===== Поток клиента =====
 DWORD WINAPI ClientThread(LPVOID lpParam) {
     SOCKET clientSocket = *(SOCKET*)lpParam;
     delete (SOCKET*)lpParam;
 
-    Message msg;
-    char hello[] = "Сервер подключен\r\n";
-    send(clientSocket, hello, strlen(hello), 0);
+    Message msg{};
 
     while (recv(clientSocket, (char*)&msg, sizeof(msg), 0) > 0) {
-        WaitForSingleObject(hMutexConsole, INFINITE);
 
         if (msg.type == 1) {
-            cout << "Сообщение: " << msg.message << endl;
+            // ---- Эхо ----
+            WaitForSingleObject(hMutexConsole, INFINITE);
+            cout << "[Эхо] Сообщение: " << msg.message << endl;
             ReleaseMutex(hMutexConsole);
 
             send(clientSocket, msg.message, strlen(msg.message), 0);
         }
 
-        if (msg.type == 2) {
+        else if (msg.type == 2) {
+            // ---- Деканат ----
             Student s = msg.st;
-            cout << "Студент: " << s.fam << endl;
+
+            WaitForSingleObject(hMutexConsole, INFINITE);
+            cout << "[Деканат] Студент: " << s.fam << endl;
+            ReleaseMutex(hMutexConsole);
 
             int minVal = 5;
             for (int i = 0; i < 4; i++)
@@ -71,7 +75,6 @@ DWORD WINAPI ClientThread(LPVOID lpParam) {
             else if (minVal == 4) result = "Стипендия 1500";
             else result = "Стипендия 2200";
 
-            ReleaseMutex(hMutexConsole);
             send(clientSocket, result.c_str(), result.length(), 0);
         }
     }
@@ -87,6 +90,8 @@ DWORD WINAPI ClientThread(LPVOID lpParam) {
 
 int main() {
     setlocale(LC_ALL, "rus");
+    SetConsoleCP(1251);
+    SetConsoleOutputCP(1251);
 
     WSADATA ws;
     WSAStartup(MAKEWORD(2, 2), &ws);
@@ -119,3 +124,4 @@ int main() {
         CreateThread(NULL, 0, ClientThread, client, 0, NULL);
     }
 }
+
