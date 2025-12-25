@@ -11,46 +11,99 @@ using namespace std;
 
 int main() {
     WSADATA wsa;
-    WSAStartup(MAKEWORD(2, 2), &wsa);
 
-    SOCKET server = socket(AF_INET, SOCK_STREAM, 0);
+    // 1. Инициализация Winsock
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+        cout << "WSAStartup failed\n";
+        return 1;
+    }
 
+    // 2. Создание TCP-сокета
+    SOCKET server = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (server == INVALID_SOCKET) {
+        cout << "Socket creation failed: " << WSAGetLastError() << endl;
+        WSACleanup();
+        return 1;
+    }
+
+    // 3. Разрешаем повторное использование порта
+    int opt = 1;
+    setsockopt(server, SOL_SOCKET, SO_REUSEADDR,
+        (char*)&opt, sizeof(opt));
+
+    // 4. Настройка адреса сервера
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
-    addr.sin_port = htons(8000);
-    addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    addr.sin_port = htons(8080);                 // рабочий порт
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);    // важно!
 
-    bind(server, (sockaddr*)&addr, sizeof(addr));
-    listen(server, SOMAXCONN);
+    // 5. Привязка сокета
+    if (bind(server, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) {
+        cout << "Bind failed: " << WSAGetLastError() << endl;
+        closesocket(server);
+        WSACleanup();
+        return 1;
+    }
 
-    cout << "HTTP Server running at http://localhost:8000\n";
+    // 6. Переход в режим прослушивания
+    if (listen(server, SOMAXCONN) == SOCKET_ERROR) {
+        cout << "Listen failed\n";
+        closesocket(server);
+        WSACleanup();
+        return 1;
+    }
 
+    cout << "HTTP Server running at http://localhost:8080\n";
+
+    // 7. Основной цикл сервера
     while (true) {
         sockaddr_in client{};
-        int size = sizeof(client);
-        SOCKET sock = accept(server, (sockaddr*)&client, &size);
+        int clientSize = sizeof(client);
 
+        SOCKET clientSocket = accept(server, (sockaddr*)&client, &clientSize);
+        if (clientSocket == INVALID_SOCKET) {
+            cout << "Accept failed\n";
+            continue;
+        }
+
+        // 8. Приём HTTP-запроса
         char buffer[1024];
-        int len = recv(sock, buffer, sizeof(buffer) - 1, 0);
-        buffer[len] = '\0';
+        int bytesReceived = recv(clientSocket, buffer, sizeof(buffer) - 1, 0);
 
+        if (bytesReceived <= 0) {
+            closesocket(clientSocket);
+            continue;
+        }
+
+        buffer[bytesReceived] = '\0';
+
+        // 9. Формирование HTML-страницы
         string html =
-            "<html><body>"
+            "<html><head><title>HTTP Server</title></head>"
+            "<body>"
             "<h2>Simple C++ HTTP Server</h2>"
+            "<p>Received request:</p>"
             "<pre>" + string(buffer) + "</pre>"
             "</body></html>";
 
+        // 10. Формирование HTTP-ответа
         string response =
             "HTTP/1.1 200 OK\r\n"
             "Content-Type: text/html; charset=utf-8\r\n"
-            "Content-Length: " + to_string(html.length()) + "\r\n\r\n" +
+            "Content-Length: " + to_string(html.length()) + "\r\n"
+            "Connection: close\r\n\r\n" +
             html;
 
-        send(sock, response.c_str(), response.length(), 0);
-        closesocket(sock);
+        // 11. Отправка ответа клиенту
+        send(clientSocket, response.c_str(), response.length(), 0);
+
+        // 12. Закрытие соединения
+        closesocket(clientSocket);
     }
 
+    // 13. Очистка ресурсов (не дойдёт из-за while(true))
     closesocket(server);
     WSACleanup();
     return 0;
 }
+
