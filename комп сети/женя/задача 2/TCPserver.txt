@@ -3,6 +3,7 @@
 
 #include <iostream>
 #include <winsock2.h>
+#include <windows.h>
 
 #pragma comment(lib, "ws2_32.lib")
 using namespace std;
@@ -46,6 +47,8 @@ int main() {
     SOCKET listenSocket, clientSocket;
     sockaddr_in serverAddr{}, clientAddr{};
     int clientSize = sizeof(clientAddr);
+    SetConsoleCP(1251);
+    SetConsoleOutputCP(1251);
 
     WSAStartup(MAKEWORD(2, 2), &wsa);
 
