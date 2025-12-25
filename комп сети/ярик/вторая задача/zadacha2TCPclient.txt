@@ -3,9 +3,11 @@
 
 #include <iostream>
 #include <winsock2.h>
-using namespace std;
+#include <string> 
+#include <windows.h>
 
 #pragma comment(lib, "ws2_32.lib")
+using namespace std;
 
 struct Student {
     int id;
@@ -15,16 +17,29 @@ struct Student {
 };
 
 void printStudent(const Student& s) {
-    cout << "\nРезультат:\n" << "Студент: " << s.name << "\nСтатус: " << s.status << "\n------------------" << endl;
+    cout << "\nРезультат:\n";
+    cout << "Студент: " << s.name << endl;
+    cout << "Статус: " << s.status << endl;
+    cout << "------------------\n";
 }
 
 int main() {
+    SetConsoleCP(1251); // чтобы в консоли нормально писались русские буквы
+    SetConsoleOutputCP(1251);
     WSADATA wsa;
     SOCKET sock;
     sockaddr_in server{};
 
-    WSAStartup(MAKEWORD(2, 2), &wsa);
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
+        cout << "Ошибка WSAStartup\n";
+        return 1;
+    }
+
     sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock == INVALID_SOCKET) {
+        cout << "Ошибка создания сокета\n";
+        return 1;
+    }
 
     server.sin_family = AF_INET;
     server.sin_addr.s_addr = inet_addr("127.0.0.1");
@@ -32,6 +47,8 @@ int main() {
 
     if (connect(sock, (sockaddr*)&server, sizeof(server)) == SOCKET_ERROR) {
         cout << "Ошибка подключения к серверу деканата.\n";
+        closesocket(sock);
+        WSACleanup();
         return 1;
     }
 
@@ -46,23 +63,31 @@ int main() {
 
         cout << "\nВведите имя студента (exit для выхода): ";
         getline(cin, input);
+
         if (input == "exit") {
             s.id = -1;
             send(sock, (char*)&s, sizeof(s), 0);
             break;
         }
+
         strcpy(s.name, input.c_str());
 
-        cout << "Введите 5 оценок через Enter:\n";
-        for (int i = 0; i < 5; ++i) {
-            cout << "Оценка " << (i + 1) << ": ";
+        cout << "Введите 5 оценок:\n";
+        for (int i = 0; i < 5; i++) {
+            cout << "Оценка " << i + 1 << ": ";
             cin >> s.grades[i];
         }
-        cin.ignore();
+        cin.ignore(); // очистка \n
 
         send(sock, (char*)&s, sizeof(s), 0);
+
         Student response{};
-        recv(sock, (char*)&response, sizeof(response), 0);
+        int bytes = recv(sock, (char*)&response, sizeof(response), 0);
+
+        if (bytes <= 0) {
+            cout << "Соединение с сервером потеряно\n";
+            break;
+        }
 
         printStudent(response);
     }
@@ -71,3 +96,4 @@ int main() {
     WSACleanup();
     return 0;
 }
+
