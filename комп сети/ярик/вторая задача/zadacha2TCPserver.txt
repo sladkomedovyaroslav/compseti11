@@ -3,6 +3,8 @@
 
 #include <iostream>
 #include <winsock2.h>
+#include <windows.h>
+
 using namespace std;
 
 #pragma comment(lib, "ws2_32.lib")
@@ -37,6 +39,8 @@ void printStudent(const Student& s) {
 }
 
 int main() {
+    SetConsoleCP(1251); // чтобы в консоли нормально писались русские буквы
+    SetConsoleOutputCP(1251);
     WSADATA wsa;
     SOCKET serverSocket, clientSocket;
     sockaddr_in server{}, client{};
