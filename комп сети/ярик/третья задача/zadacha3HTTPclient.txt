@@ -15,8 +15,8 @@ using namespace std;
 // Формирование HTTP GET запроса
 string buildGetRequest(const string& host, const string& path = "/") {
     return "GET " + path + " HTTP/1.1\r\n"
-           "Host: " + host + "\r\n"
-           "Connection: close\r\n\r\n";
+        "Host: " + host + "\r\n"
+        "Connection: close\r\n\r\n";
 }
 
 // Отправка HTTP запроса
@@ -78,7 +78,7 @@ int main() {
 
         if (cmd == 0) break;
 
-        if (cmd == 1) httpRequest("localhost", 8000);
+        if (cmd == 1) httpRequest("localhost", 8080);
         else if (cmd == 2) httpRequest("json.org", 80);
         else if (cmd == 3) httpRequest("library.ru", 80);
         else cout << "Invalid choice\n";
