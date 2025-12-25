@@ -3,6 +3,8 @@
 
 #include <iostream>
 #include <winsock2.h>
+#include <string>
+#include <windows.h>
 
 #pragma comment(lib, "ws2_32.lib")
 using namespace std;
@@ -47,6 +49,8 @@ int main() {
     SOCKET udpSocket;
     sockaddr_in serverAddr{}, clientAddr{};
     int clientLen = sizeof(clientAddr);
+    SetConsoleCP(1251);
+    SetConsoleOutputCP(1251);
 
     WSAStartup(MAKEWORD(2, 2), &wsaData);
 
@@ -64,13 +68,13 @@ int main() {
         StudentInfo student{};
 
         recvfrom(udpSocket, (char*)&student, sizeof(student), 0,
-                 (sockaddr*)&clientAddr, &clientLen);
+            (sockaddr*)&clientAddr, &clientLen);
 
         makeDecision(student);
         showOnServer(student);
 
         sendto(udpSocket, (char*)&student, sizeof(student), 0,
-               (sockaddr*)&clientAddr, clientLen);
+            (sockaddr*)&clientAddr, clientLen);
     }
 
     closesocket(udpSocket);
