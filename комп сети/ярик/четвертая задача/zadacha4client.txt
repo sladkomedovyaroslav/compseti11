@@ -1,83 +1,100 @@
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
+
+#include <winsock2.h>
 #include <iostream>
 #include <string>
+#include <thread>
 
-#define _WINSOCK_DEPRECATED_NO_WARNINGS
-#include <WinSock2.h>
-#include <Windows.h>
-#pragma comment(lib, "Ws2_32.lib")
+#pragma comment(lib, "ws2_32.lib")
 
 using namespace std;
 
-#define SRV_ADDR "127.0.0.1"
-#define SRV_PORT 666
-#include <clocale>
-// ===== Структуры =====
-struct Student {
-    char fam[20];
-    int vals[4];
-};
+constexpr const char* HOST = "127.0.0.1";
+constexpr int CHAT_PORT = 8888;
+constexpr int BUF_LEN = 1024;
 
-struct Message {
-    int type;              // 1 - эхо, 2 - деканат
-    char message[256];     // сообщение для эхо
-    Student st;            // данные студента
-};
+SOCKET sock;
+bool isActive = true;
 
-int main() {
+void ListenServer()
+{
+    char buf[BUF_LEN];
+
+    while (isActive)
+    {
+        int received = recv(sock, buf, BUF_LEN - 1, 0);
+
+        if (received > 0)
+        {
+            buf[received] = '\0';
+            cout << "\n" << buf << endl;
+        }
+        else
+        {
+            cout << "Соединение с сервером потеряно\n";
+            isActive = false;
+            break;
+        }
+    }
+}
+
+int main()
+{
     setlocale(LC_ALL, "rus");
-    SetConsoleCP(1251);
-    SetConsoleOutputCP(1251);
 
-    WSADATA ws;
-    WSAStartup(MAKEWORD(2, 2), &ws);
-
-    SOCKET s = socket(AF_INET, SOCK_STREAM, 0);
-
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(SRV_PORT);
-    addr.sin_addr.s_addr = inet_addr(SRV_ADDR);
-
-    if (connect(s, (sockaddr*)&addr, sizeof(addr)) != 0) {
-        cout << "Ошибка подключения к серверу\n";
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData))
+    {
+        cout << "Ошибка инициализации Winsock\n";
         return 1;
     }
 
-    Message msg{};
-    cout << "1 - Эхо\n2 - Деканат\nВыбор: ";
-    cin >> msg.type;
-    cin.ignore();
-
-    if (msg.type == 1) {
-        cout << "Введите сообщение: ";
-        cin.getline(msg.message, 256);
-    }
-    else if (msg.type == 2) {
-        cout << "Фамилия: ";
-        cin.getline(msg.st.fam, 20);
-        cout << "Введите 4 оценки: ";
-        for (int i = 0; i < 4; i++)
-            cin >> msg.st.vals[i];
-    }
-    else {
-        cout << "Неверный тип запроса\n";
-        closesocket(s);
-        WSACleanup();
-        return 0;
+    sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (sock == INVALID_SOCKET)
+    {
+        cout << "Не удалось создать сокет\n";
+        return 1;
     }
 
-    // Отправка структуры серверу
-    send(s, (char*)&msg, sizeof(msg), 0);
+    sockaddr_in server{};
+    server.sin_family = AF_INET;
+    server.sin_port = htons(CHAT_PORT);
+    server.sin_addr.s_addr = inet_addr(HOST);
 
-    // Прием ответа сервера
-    char buf[256]{};
-    int bytes = recv(s, buf, sizeof(buf) - 1, 0);
-    if (bytes > 0) {
-        buf[bytes] = '\0';
-        cout << "Ответ сервера: " << buf << endl;
+    cout << "Подключение к серверу...\n";
+    if (connect(sock, (sockaddr*)&server, sizeof(server)) == SOCKET_ERROR)
+    {
+        cout << "Ошибка подключения\n";
+        return 1;
     }
 
-    closesocket(s);
+    string name;
+    cout << "Ваш ник: ";
+    getline(cin, name);
+    send(sock, name.c_str(), name.size(), 0);
+
+    thread listener(ListenServer);
+
+    while (isActive)
+    {
+        string text;
+        cout << "> ";
+        getline(cin, text);
+
+        if (text == "/quit")
+        {
+            send(sock, "/quit", 5, 0);
+            isActive = false;
+            break;
+        }
+
+        if (!text.empty())
+            send(sock, text.c_str(), text.size(), 0);
+    }
+
+    listener.join();
+    closesocket(sock);
     WSACleanup();
+
     return 0;
 }
