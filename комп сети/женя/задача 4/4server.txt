@@ -1,121 +1,159 @@
-#include <iostream>
 #include <winsock2.h>
-#include <windows.h>
-#pragma comment(lib, "Ws2_32.lib")
+#include <iostream>
+#include <vector>
+#include <string>
+#include <thread>
+#include <mutex>
+
+#pragma comment(lib, "ws2_32.lib")
 
 using namespace std;
 
-#define SERVER_PORT 666
+static const unsigned short SERVER_PORT = 5555;
+static const int MAX_BUF = 1024;
 
-// ===== Структуры данных =====
-struct StudentData {
-    char surname[20];
-    int marks[4];
+struct Client
+{
+    SOCKET socket;
+    string name;
 };
 
-struct Packet {
-    int mode;               // 1 — эхо, 2 — деканат
-    char text[256];
-    StudentData student;
-};
+vector<Client> clients;
+mutex clientsLock;
 
-// ===== Глобальные ресурсы =====
-int activeClients = 0;
-CRITICAL_SECTION csCounter;     // защита счётчика клиентов
-HANDLE consoleMutex;            // синхронизация вывода в консоль
+void SendAll(const string& text, SOCKET skip = INVALID_SOCKET)
+{
+    lock_guard<mutex> guard(clientsLock);
+    cout << text << endl;
 
-// ===== Вывод количества клиентов =====
-void showClientCount() {
-    EnterCriticalSection(&csCounter);
-    cout << "[Сервер] Подключено клиентов: " << activeClients << endl;
-    LeaveCriticalSection(&csCounter);
+    for (auto& c : clients)
+        if (c.socket != skip)
+            send(c.socket, text.c_str(), (int)text.size(), 0);
 }
 
-// ===== Поток обработки клиента =====
-DWORD WINAPI ClientHandler(LPVOID param) {
-    SOCKET clientSocket = *(SOCKET*)param;
-    delete (SOCKET*)param;
+void SendOne(SOCKET s, const string& text)
+{
+    send(s, text.c_str(), (int)text.size(), 0);
+}
 
-    Packet packet{};
+Client* FindClient(const string& name)
+{
+    for (auto& c : clients)
+        if (c.name == name)
+            return &c;
+    return nullptr;
+}
 
-    // Приём пакета от клиента
-    if (recv(clientSocket, (char*)&packet, sizeof(packet), 0) <= 0) {
-        closesocket(clientSocket);
-        return 0;
+void ProcessClient(SOCKET sock)
+{
+    char buffer[MAX_BUF];
+    int len = recv(sock, buffer, MAX_BUF - 1, 0);
+    if (len <= 0) return;
+
+    buffer[len] = '\0';
+    Client client{ sock, buffer };
+
+    {
+        lock_guard<mutex> guard(clientsLock);
+        clients.push_back(client);
     }
 
-    WaitForSingleObject(consoleMutex, INFINITE);
+    SendAll(client.name + " подключился к чату", sock);
 
-    if (packet.mode == 1) {
-        // ===== ЭХО-СЕРВЕР =====
-        cout << "[Эхо] Получено сообщение: " << packet.text << endl;
-        ReleaseMutex(consoleMutex);
+    SendOne(sock,
+        "Добро пожаловать!\n"
+        "/private [ник] [сообщение]\n"
+        "/list\n"
+        "/quit\n"
+    );
 
-        send(clientSocket, packet.text, strlen(packet.text) + 1, 0);
+    bool alive = true;
+    while (alive)
+    {
+        len = recv(sock, buffer, MAX_BUF - 1, 0);
+        if (len <= 0) break;
+
+        buffer[len] = '\0';
+        string msg = buffer;
+
+        if (msg == "/quit")
+            break;
+
+        if (msg == "/list")
+        {
+            string list = "Пользователи:\n";
+            lock_guard<mutex> guard(clientsLock);
+            for (auto& c : clients)
+                list += "• " + c.name + "\n";
+            SendOne(sock, list);
+        }
+        else if (msg.rfind("/private ", 0) == 0)
+        {
+            auto rest = msg.substr(9);
+            auto pos = rest.find(' ');
+            if (pos != string::npos)
+            {
+                auto target = rest.substr(0, pos);
+                auto text = rest.substr(pos + 1);
+
+                Client* rec = FindClient(target);
+                if (rec && rec->socket != sock)
+                {
+                    SendOne(rec->socket, "Лично от " + client.name + ": " + text);
+                    SendOne(sock, "Отправлено");
+                }
+                else
+                    SendOne(sock, "Пользователь не найден");
+            }
+        }
+        else
+        {
+            SendAll(client.name + ": " + msg, sock);
+        }
     }
-    else if (packet.mode == 2) {
-        // ===== ДЕКАНАТ =====
-        StudentData s = packet.student;
-        cout << "[Деканат] Студент: " << s.surname << endl;
 
-        int minMark = 5;
-        for (int i = 0; i < 4; i++)
-            minMark = min(minMark, s.marks[i]);
+    string left = client.name + " вышел из чата";
 
-        string reply;
-        if (minMark <= 2) reply = "Задолженность";
-        else if (minMark == 3) reply = "Без стипендии";
-        else if (minMark == 4) reply = "Стипендия 1500";
-        else reply = "Стипендия 2200";
-
-        ReleaseMutex(consoleMutex);
-        send(clientSocket, reply.c_str(), reply.size() + 1, 0);
+    {
+        lock_guard<mutex> guard(clientsLock);
+        clients.erase(
+            remove_if(clients.begin(), clients.end(),
+                [&](const Client& c) { return c.socket == sock; }),
+            clients.end()
+        );
     }
 
-    // ===== Завершение работы клиента =====
-    EnterCriticalSection(&csCounter);
-    activeClients--;
-    LeaveCriticalSection(&csCounter);
+    closesocket(sock);
+    SendAll(left);
+}
 
-    showClientCount();
-    closesocket(clientSocket);
+int main()
+{
+    setlocale(LC_ALL, "rus");
+
+    WSADATA ws;
+    WSAStartup(MAKEWORD(2, 2), &ws);
+
+    SOCKET server = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_port = htons(SERVER_PORT);
+
+    bind(server, (sockaddr*)&addr, sizeof(addr));
+    listen(server, SOMAXCONN);
+
+    cout << "Сервер запущен на порту " << SERVER_PORT << endl;
+
+    while (true)
+    {
+        SOCKET client = accept(server, nullptr, nullptr);
+        if (client != INVALID_SOCKET)
+            thread(ProcessClient, client).detach();
+    }
+
+    closesocket(server);
+    WSACleanup();
     return 0;
 }
-
-// ===== Точка входа =====
-int main() {
-    setlocale(LC_ALL, "rus");
-    SetConsoleCP(1251);
-    SetConsoleOutputCP(1251);
-
-    WSADATA wsa;
-    WSAStartup(MAKEWORD(2, 2), &wsa);
-
-    InitializeCriticalSection(&csCounter);
-    consoleMutex = CreateMutex(nullptr, FALSE, nullptr);
-
-    SOCKET serverSocket = socket(AF_INET, SOCK_STREAM, 0);
-
-    sockaddr_in serverAddr{};
-    serverAddr.sin_family = AF_INET;
-    serverAddr.sin_port = htons(SERVER_PORT);
-    serverAddr.sin_addr.s_addr = INADDR_ANY;
-
-    bind(serverSocket, (sockaddr*)&serverAddr, sizeof(serverAddr));
-    listen(serverSocket, SOMAXCONN);
-
-    cout << "Сервер запущен. Ожидание клиентов...\n";
-
-    while (true) {
-        SOCKET* clientSocket = new SOCKET;
-        *clientSocket = accept(serverSocket, nullptr, nullptr);
-
-        EnterCriticalSection(&csCounter);
-        activeClients++;
-        LeaveCriticalSection(&csCounter);
-
-        showClientCount();
-        CreateThread(nullptr, 0, ClientHandler, clientSocket, 0, nullptr);
-    }
-}
-
