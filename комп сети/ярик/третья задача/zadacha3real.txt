@@ -1,0 +1,94 @@
+#include <iostream>
+#include <string>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+
+#pragma comment(lib, "ws2_32.lib")
+
+using namespace std;
+
+int main() {
+    WSADATA data;
+    WSAStartup(MAKEWORD(2, 2), &data);
+
+    SOCKET serverSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+
+    sockaddr_in serverAddr{};
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_addr.s_addr = INADDR_ANY;
+    serverAddr.sin_port = htons(9090);
+
+    bind(serverSocket, (sockaddr*)&serverAddr, sizeof(serverAddr));
+    listen(serverSocket, SOMAXCONN);
+
+    cout << "Server started at http://localhost:9090" << endl;
+
+    while (true) {
+        SOCKET clientSocket = accept(serverSocket, nullptr, nullptr);
+
+        char buffer[4096];
+        int received = recv(clientSocket, buffer, sizeof(buffer), 0);
+
+        if (received > 0) {
+            string html = R"(
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Hi World</title>
+    <style>
+        body {
+            margin: 0;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #43cea2, #185a9d);
+            font-family: 'Segoe UI', sans-serif;
+        }
+        .card {
+            background: #fff;
+            padding: 40px 50px;
+            border-radius: 18px;
+            box-shadow: 0 12px 30px rgba(0,0,0,0.25);
+            text-align: center;
+        }
+        h1 {
+            font-size: 48px;
+            margin: 0;
+            color: #185a9d;
+            letter-spacing: 2px;
+        }
+        p {
+            margin-top: 12px;
+            color: #666;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>hi world</h1>
+        <p>From C++ HTTP server</p>
+    </div>
+</body>
+</html>
+)";
+
+            string response =
+                "HTTP/1.1 200 OK\r\n"
+                "Content-Type: text/html; charset=utf-8\r\n"
+                "Content-Length: " + to_string(html.size()) + "\r\n"
+                "Connection: close\r\n"
+                "\r\n" + html;
+
+            send(clientSocket, response.c_str(), response.size(), 0);
+        }
+
+        closesocket(clientSocket);
+    }
+
+    closesocket(serverSocket);
+    WSACleanup();
+    return 0;
+}
