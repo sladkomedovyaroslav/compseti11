@@ -1,121 +1,103 @@
-#include <iostream>
+#define _WINSOCK_DEPRECATED_NO_WARNINGS
+
 #include <winsock2.h>
-#include <ws2tcpip.h>
-#include <windows.h>
+#include <iostream>
+#include <string>
+#include <thread>
+#include <atomic>
 
-#pragma comment(lib, "Ws2_32.lib")
+#pragma comment(lib, "ws2_32.lib")
 
-using namespace std;
+using std::cout;
+using std::cin;
+using std::endl;
+using std::string;
 
-#define SERVER_IP "127.0.0.1"
-#define SERVER_PORT 666
+static const char* SERVER_ADDR = "127.0.0.1";
+static const unsigned short SERVER_PORT = 5555;
+static const int MAX_BUF = 1024;
 
-// ===== Структуры данных =====
-struct StudentData {
-    char surname[20];
-    int marks[4];
-};
+SOCKET g_socket = INVALID_SOCKET;
+std::atomic<bool> g_connected(true);
 
-struct Packet {
-    int mode;               // 1 — эхо, 2 — деканат
-    char text[256];
-    StudentData student;
-};
+void ServerReader()
+{
+    char data[MAX_BUF];
 
-int main() {
+    while (g_connected)
+    {
+        int size = recv(g_socket, data, MAX_BUF - 1, 0);
+        if (size <= 0)
+        {
+            cout << "\n[Система] Соединение закрыто\n";
+            g_connected = false;
+            break;
+        }
+
+        data[size] = '\0';
+        cout << "\n" << data << endl;
+    }
+}
+
+int main()
+{
     setlocale(LC_ALL, "rus");
-    SetConsoleCP(1251);
-    SetConsoleOutputCP(1251);
 
-    cout << "=== Клиент запущен ===\n";
-
-    // ===== Инициализация WinSock =====
-    WSADATA wsa;
-    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
-        cout << "Ошибка WSAStartup\n";
-        system("pause");
+    WSADATA ws{};
+    if (WSAStartup(MAKEWORD(2, 2), &ws) != 0)
+    {
+        cout << "Ошибка запуска Winsock\n";
         return 1;
     }
 
-    // ===== Создание сокета =====
-    SOCKET sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock == INVALID_SOCKET) {
-        cout << "Ошибка создания сокета\n";
-        WSACleanup();
-        system("pause");
+    g_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (g_socket == INVALID_SOCKET)
+    {
+        cout << "Ошибка сокета\n";
         return 1;
     }
 
-    // ===== Адрес сервера =====
-    sockaddr_in serverAddr{};
-    serverAddr.sin_family = AF_INET;
-    serverAddr.sin_port = htons(SERVER_PORT);
+    sockaddr_in server{};
+    server.sin_family = AF_INET;
+    server.sin_port = htons(SERVER_PORT);
+    server.sin_addr.s_addr = inet_addr(SERVER_ADDR);
 
-    // ВАЖНО: используем InetPtonA (ANSI-версия)
-    if (InetPtonA(AF_INET, SERVER_IP, &serverAddr.sin_addr) != 1) {
-        cout << "Ошибка преобразования IP-адреса\n";
-        closesocket(sock);
-        WSACleanup();
-        system("pause");
+    cout << "Подключение...\n";
+    if (connect(g_socket, (sockaddr*)&server, sizeof(server)) != 0)
+    {
+        cout << "Сервер недоступен\n";
         return 1;
     }
 
-    // ===== Подключение =====
-    cout << "Подключение к серверу...\n";
-    if (connect(sock, (sockaddr*)&serverAddr, sizeof(serverAddr)) != 0) {
-        cout << "Ошибка connect(): " << WSAGetLastError() << endl;
-        closesocket(sock);
-        WSACleanup();
-        system("pause");
-        return 1;
+    cout << "Введите ник: ";
+    string nick;
+    getline(cin, nick);
+    send(g_socket, nick.c_str(), (int)nick.length(), 0);
+
+    std::thread reader(ServerReader);
+
+    while (g_connected)
+    {
+        cout << "> ";
+        string input;
+        getline(cin, input);
+
+        if (input == "/quit")
+        {
+            send(g_socket, "/quit", 5, 0);
+            g_connected = false;
+            break;
+        }
+
+        if (!input.empty())
+            send(g_socket, input.c_str(), (int)input.length(), 0);
     }
 
-    cout << "Соединение установлено!\n";
-
-    // ===== Формирование пакета =====
-    Packet packet{};
-    cout << "\nВыберите режим:\n1 — Эхо\n2 — Деканат\n> ";
-    cin >> packet.mode;
-    cin.ignore();
-
-    if (packet.mode == 1) {
-        cout << "Введите текст: ";
-        cin.getline(packet.text, 256);
-    }
-    else if (packet.mode == 2) {
-        cout << "Фамилия студента: ";
-        cin.getline(packet.student.surname, 20);
-        cout << "Введите 4 оценки: ";
-        for (int i = 0; i < 4; i++)
-            cin >> packet.student.marks[i];
-    }
-    else {
-        cout << "Неверный режим\n";
-        closesocket(sock);
-        WSACleanup();
-        system("pause");
-        return 0;
-    }
-
-    // ===== Отправка пакета =====
-    send(sock, (char*)&packet, sizeof(packet), 0);
-
-    // ===== Приём ответа =====
-    char response[256]{};
-    int bytesReceived = recv(sock, response, sizeof(response), 0);
-
-    if (bytesReceived > 0) {
-        cout << "\nОтвет сервера: " << response << endl;
-    }
-    else {
-        cout << "Ответ от сервера не получен\n";
-    }
-
-    // ===== Завершение работы =====
-    closesocket(sock);
+    reader.join();
+    closesocket(g_socket);
     WSACleanup();
 
-    system("pause");
     return 0;
 }
+
 
