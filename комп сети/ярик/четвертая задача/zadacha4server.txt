@@ -1,127 +1,174 @@
+#include <winsock2.h>
 #include <iostream>
+#include <vector>
 #include <string>
+#include <thread>
+#include <mutex>
 
-#define _WINSOCK_DEPRECATED_NO_WARNINGS
-#include <WinSock2.h>
-#include <Windows.h>
-#pragma comment(lib, "Ws2_32.lib")
+#pragma comment(lib, "ws2_32.lib")
 
 using namespace std;
 
-#define LISTENPORT 666
-#include <clocale>
+constexpr int CHAT_PORT = 8888;
+constexpr int BUF_LEN = 1024;
 
-// ===== Структуры =====
-struct Student {
-    char fam[20];
-    int vals[4];
-};
+vector<SOCKET> sockets;
+vector<string> names;
+mutex dataMutex;
 
-struct Message {
-    int type;
-    char message[256];
-    Student st;
-};
+void Broadcast(const string& text, SOCKET exclude = INVALID_SOCKET)
+{
+    lock_guard<mutex> lock(dataMutex);
+    cout << text << endl;
 
-// ===== Глобальные данные =====
-int nClients = 0;
-
-// Критическая секция для счетчика клиентов
-CRITICAL_SECTION csClients;
-
-// Мьютекс для консоли
-HANDLE hMutexConsole;
-
-// ===== Вывод количества клиентов =====
-void printUsers() {
-    EnterCriticalSection(&csClients);
-    cout << "Клиентов онлайн: " << nClients << endl << endl;
-    LeaveCriticalSection(&csClients);
+    for (auto s : sockets)
+        if (s != exclude)
+            send(s, text.c_str(), text.size(), 0);
 }
 
-// ===== Поток клиента =====
-DWORD WINAPI ClientThread(LPVOID lpParam) {
-    SOCKET clientSocket = *(SOCKET*)lpParam;
-    delete (SOCKET*)lpParam;
+void SendDirect(SOCKET s, const string& text)
+{
+    if (s != INVALID_SOCKET)
+        send(s, text.c_str(), text.size(), 0);
+}
 
-    Message msg{};
+int FindUser(const string& nickname)
+{
+    lock_guard<mutex> lock(dataMutex);
+    for (size_t i = 0; i < names.size(); ++i)
+        if (names[i] == nickname)
+            return (int)i;
+    return -1;
+}
 
-    while (recv(clientSocket, (char*)&msg, sizeof(msg), 0) > 0) {
+void HandleClient(SOCKET client)
+{
+    char buf[BUF_LEN];
+    string nickname = "Guest";
 
-        if (msg.type == 1) {
-            // ---- Эхо ----
-            WaitForSingleObject(hMutexConsole, INFINITE);
-            cout << "[Эхо] Сообщение: " << msg.message << endl;
-            ReleaseMutex(hMutexConsole);
+    int len = recv(client, buf, BUF_LEN - 1, 0);
+    if (len <= 0) return;
 
-            send(clientSocket, msg.message, strlen(msg.message), 0);
+    buf[len] = '\0';
+    nickname = buf;
+
+    {
+        lock_guard<mutex> lock(dataMutex);
+        sockets.push_back(client);
+        names.push_back(nickname);
+    }
+
+    Broadcast(nickname + " вошёл в чат", client);
+
+    SendDirect(client,
+        "Добро пожаловать, " + nickname + "!\n"
+        "Команды:\n"
+        "/private [ник] [текст]\n"
+        "/list\n"
+        "/quit\n"
+    );
+
+    bool online = true;
+    while (online)
+    {
+        len = recv(client, buf, BUF_LEN - 1, 0);
+        if (len <= 0) break;
+
+        buf[len] = '\0';
+        string msg = buf;
+
+        if (msg == "/quit")
+            break;
+
+        else if (msg == "/list")
+        {
+            string list = "Пользователи:\n";
+            lock_guard<mutex> lock(dataMutex);
+            for (auto& n : names)
+                list += "- " + n + "\n";
+            SendDirect(client, list);
         }
 
-        else if (msg.type == 2) {
-            // ---- Деканат ----
-            Student s = msg.st;
+        else if (msg.rfind("/private ", 0) == 0)
+        {
+            string rest = msg.substr(9);
+            size_t pos = rest.find(' ');
 
-            WaitForSingleObject(hMutexConsole, INFINITE);
-            cout << "[Деканат] Студент: " << s.fam << endl;
-            ReleaseMutex(hMutexConsole);
+            if (pos != string::npos)
+            {
+                string target = rest.substr(0, pos);
+                string text = rest.substr(pos + 1);
 
-            int minVal = 5;
-            for (int i = 0; i < 4; i++)
-                minVal = min(minVal, s.vals[i]);
-
-            string result;
-            if (minVal <= 2) result = "Есть задолженности";
-            else if (minVal == 3) result = "Без стипендии";
-            else if (minVal == 4) result = "Стипендия 1500";
-            else result = "Стипендия 2200";
-
-            send(clientSocket, result.c_str(), result.length(), 0);
+                int idx = FindUser(target);
+                if (idx != -1)
+                {
+                    SendDirect(sockets[idx], "Лично от " + nickname + ": " + text);
+                    SendDirect(client, "Сообщение отправлено");
+                }
+                else
+                    SendDirect(client, "Пользователь не найден");
+            }
+        }
+        else
+        {
+            Broadcast(nickname + ": " + msg, client);
         }
     }
 
-    EnterCriticalSection(&csClients);
-    nClients--;
-    LeaveCriticalSection(&csClients);
+    string leaveMsg = nickname + " покинул чат";
 
-    printUsers();
-    closesocket(clientSocket);
-    return 0;
+    {
+        lock_guard<mutex> lock(dataMutex);
+        for (size_t i = 0; i < sockets.size(); ++i)
+        {
+            if (sockets[i] == client)
+            {
+                closesocket(client);
+                sockets.erase(sockets.begin() + i);
+                names.erase(names.begin() + i);
+                break;
+            }
+        }
+    }
+
+    Broadcast(leaveMsg);
 }
 
-int main() {
+int main()
+{
     setlocale(LC_ALL, "rus");
-    SetConsoleCP(1251);
-    SetConsoleOutputCP(1251);
 
-    WSADATA ws;
-    WSAStartup(MAKEWORD(2, 2), &ws);
+    WSADATA wsa;
+    WSAStartup(MAKEWORD(2, 2), &wsa);
 
-    InitializeCriticalSection(&csClients);
-    hMutexConsole = CreateMutex(NULL, FALSE, NULL);
-
-    SOCKET sListener = socket(AF_INET, SOCK_STREAM, 0);
+    SOCKET server = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
-    addr.sin_port = htons(LISTENPORT);
+    addr.sin_port = htons(CHAT_PORT);
     addr.sin_addr.s_addr = INADDR_ANY;
 
-    bind(sListener, (sockaddr*)&addr, sizeof(addr));
-    listen(sListener, SOMAXCONN);
+    bind(server, (sockaddr*)&addr, sizeof(addr));
+    listen(server, SOMAXCONN);
 
-    cout << "Сервер запущен...\n";
+    cout << "Чат-сервер запущен. Порт: " << CHAT_PORT << endl;
 
-    while (true) {
-        SOCKET* client = new SOCKET;
-        *client = accept(sListener, NULL, NULL);
+    while (true)
+    {
+        sockaddr_in clientAddr{};
+        int size = sizeof(clientAddr);
+        SOCKET client = accept(server, (sockaddr*)&clientAddr, &size);
 
-        EnterCriticalSection(&csClients);
-        nClients++;
-        LeaveCriticalSection(&csClients);
-
-        printUsers();
-
-        CreateThread(NULL, 0, ClientThread, client, 0, NULL);
+        if (client != INVALID_SOCKET)
+        {
+            cout << "Новое подключение\n";
+            thread(HandleClient, client).detach();
+        }
     }
+
+    closesocket(server);
+    WSACleanup();
+    return 0;
 }
+
 
