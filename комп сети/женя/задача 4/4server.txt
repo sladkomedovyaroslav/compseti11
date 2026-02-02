@@ -157,3 +157,173 @@ int main()
     WSACleanup();
     return 0;
 }
+
+
+
+
+ПОЧИНЕНАЯ ВЕРСИЯ
+
+#include <winsock2.h>
+#include <windows.h>
+#include <iostream>
+#include <vector>
+#include <string>
+#include <thread>
+#include <mutex>
+#include <algorithm>
+
+#pragma comment(lib, "ws2_32.lib")
+
+using namespace std;
+
+static const unsigned short SERVER_PORT = 5555;
+static const int MAX_BUF = 1024;
+
+struct Client
+{
+    SOCKET socket;
+    string name;
+};
+
+vector<Client> clients;
+mutex clientsLock;
+
+void SendAll(const string& text, SOCKET skip = INVALID_SOCKET)
+{
+    lock_guard<mutex> guard(clientsLock);
+    cout << text << endl;
+
+    for (auto& c : clients)
+        if (c.socket != skip)
+            send(c.socket, text.c_str(), (int)text.size(), 0);
+}
+
+void SendOne(SOCKET s, const string& text)
+{
+    send(s, text.c_str(), (int)text.size(), 0);
+}
+
+Client* FindClient(const string& name)
+{
+    for (auto& c : clients)
+        if (c.name == name)
+            return &c;
+    return nullptr;
+}
+
+void ProcessClient(SOCKET sock)
+{
+    char buffer[MAX_BUF];
+
+    int len = recv(sock, buffer, MAX_BUF - 1, 0);
+    if (len <= 0) return;
+
+    buffer[len] = '\0';
+    Client client{ sock, buffer };
+
+    {
+        lock_guard<mutex> guard(clientsLock);
+        clients.push_back(client);
+    }
+
+    SendAll(client.name + " подключился к чату", sock);
+
+    SendOne(sock,
+        "Добро пожаловать!\n"
+        "/private [ник] [сообщение]\n"
+        "/list\n"
+        "/quit\n"
+    );
+
+    while (true)
+    {
+        len = recv(sock, buffer, MAX_BUF - 1, 0);
+        if (len <= 0) break;
+
+        buffer[len] = '\0';
+        string msg = buffer;
+
+        if (msg == "/quit")
+            break;
+
+        if (msg == "/list")
+        {
+            string list = "Пользователи:\n";
+            lock_guard<mutex> guard(clientsLock);
+            for (auto& c : clients)
+                list += "• " + c.name + "\n";
+            SendOne(sock, list);
+        }
+        else if (msg.rfind("/private ", 0) == 0)
+        {
+            string rest = msg.substr(9);
+            auto pos = rest.find(' ');
+            if (pos != string::npos)
+            {
+                string target = rest.substr(0, pos);
+                string text = rest.substr(pos + 1);
+
+                Client* rec = FindClient(target);
+                if (rec && rec->socket != sock)
+                {
+                    SendOne(rec->socket, "Лично от " + client.name + ": " + text);
+                    SendOne(sock, "Отправлено");
+                }
+                else
+                {
+                    SendOne(sock, "Пользователь не найден");
+                }
+            }
+        }
+        else
+        {
+            SendAll(client.name + ": " + msg, sock);
+        }
+    }
+
+    {
+        lock_guard<mutex> guard(clientsLock);
+        clients.erase(
+            remove_if(clients.begin(), clients.end(),
+                [&](const Client& c) { return c.socket == sock; }),
+            clients.end()
+        );
+    }
+
+    closesocket(sock);
+    SendAll(client.name + " вышел из чата");
+}
+
+int main()
+{
+    // UTF-8 для консоли Windows
+    SetConsoleCP(CP_UTF8);
+    SetConsoleOutputCP(CP_UTF8);
+    setlocale(LC_ALL, ".UTF8");
+
+    WSADATA ws{};
+    WSAStartup(MAKEWORD(2, 2), &ws);
+
+    SOCKET server = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_port = htons(SERVER_PORT);
+
+    bind(server, (sockaddr*)&addr, sizeof(addr));
+    listen(server, SOMAXCONN);
+
+    cout << "Сервер запущен на порту " << SERVER_PORT << endl;
+
+    while (true)
+    {
+        SOCKET client = accept(server, nullptr, nullptr);
+        if (client != INVALID_SOCKET)
+            thread(ProcessClient, client).detach();
+    }
+
+    closesocket(server);
+    WSACleanup();
+    return 0;
+}
