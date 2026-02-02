@@ -7,323 +7,177 @@
 
 #pragma comment(lib, "ws2_32.lib")
 
-using namespace std;
+using std::string;
+using std::vector;
+using std::mutex;
+using std::lock_guard;
+using std::cout;
+using std::endl;
 
-static const unsigned short SERVER_PORT = 5555;
-static const int MAX_BUF = 1024;
+static const int PORT = 8888;
+static const int BUFFER_SIZE = 1024;
 
-struct Client
+vector<SOCKET> clients;
+vector<string> nicknames;
+mutex sharedMutex;
+
+void SendToAll(const string& message, SOCKET skip = INVALID_SOCKET)
 {
-    SOCKET socket;
-    string name;
-};
+    lock_guard<mutex> guard(sharedMutex);
+    cout << message << endl;
 
-vector<Client> clients;
-mutex clientsLock;
-
-void SendAll(const string& text, SOCKET skip = INVALID_SOCKET)
-{
-    lock_guard<mutex> guard(clientsLock);
-    cout << text << endl;
-
-    for (auto& c : clients)
-        if (c.socket != skip)
-            send(c.socket, text.c_str(), (int)text.size(), 0);
+    for (SOCKET s : clients)
+    {
+        if (s != skip)
+            send(s, message.c_str(), message.length(), 0);
+    }
 }
 
-void SendOne(SOCKET s, const string& text)
+void SendToOne(SOCKET target, const string& message)
 {
-    send(s, text.c_str(), (int)text.size(), 0);
+    if (target != INVALID_SOCKET)
+        send(target, message.c_str(), message.length(), 0);
 }
 
-Client* FindClient(const string& name)
+int GetClientIndex(const string& name)
 {
-    for (auto& c : clients)
-        if (c.name == name)
-            return &c;
-    return nullptr;
+    lock_guard<mutex> guard(sharedMutex);
+    for (size_t i = 0; i < nicknames.size(); ++i)
+    {
+        if (nicknames[i] == name)
+            return static_cast<int>(i);
+    }
+    return -1;
 }
 
-void ProcessClient(SOCKET sock)
+void ClientThread(SOCKET clientSocket)
 {
-    char buffer[MAX_BUF];
-    int len = recv(sock, buffer, MAX_BUF - 1, 0);
-    if (len <= 0) return;
+    char buffer[BUFFER_SIZE];
+    string userName = "Guest";
 
-    buffer[len] = '\0';
-    Client client{ sock, buffer };
+    int bytes = recv(clientSocket, buffer, BUFFER_SIZE - 1, 0);
+    if (bytes <= 0) return;
+
+    buffer[bytes] = '\0';
+    userName = buffer;
 
     {
-        lock_guard<mutex> guard(clientsLock);
-        clients.push_back(client);
+        lock_guard<mutex> guard(sharedMutex);
+        clients.push_back(clientSocket);
+        nicknames.push_back(userName);
     }
 
-    SendAll(client.name + " подключился к чату", sock);
+    SendToAll(userName + " вошёл в чат", clientSocket);
 
-    SendOne(sock,
-        "Добро пожаловать!\n"
+    SendToOne(clientSocket,
+        "Добро пожаловать, " + userName + "!\n"
+        "Доступные команды:\n"
         "/private [ник] [сообщение]\n"
         "/list\n"
         "/quit\n"
     );
 
-    bool alive = true;
-    while (alive)
+    while (true)
     {
-        len = recv(sock, buffer, MAX_BUF - 1, 0);
-        if (len <= 0) break;
+        bytes = recv(clientSocket, buffer, BUFFER_SIZE - 1, 0);
+        if (bytes <= 0) break;
 
-        buffer[len] = '\0';
-        string msg = buffer;
+        buffer[bytes] = '\0';
+        string command = buffer;
 
-        if (msg == "/quit")
+        if (command == "/quit")
             break;
 
-        if (msg == "/list")
+        if (command == "/list")
         {
-            string list = "Пользователи:\n";
-            lock_guard<mutex> guard(clientsLock);
-            for (auto& c : clients)
-                list += "• " + c.name + "\n";
-            SendOne(sock, list);
-        }
-        else if (msg.rfind("/private ", 0) == 0)
-        {
-            auto rest = msg.substr(9);
-            auto pos = rest.find(' ');
-            if (pos != string::npos)
-            {
-                auto target = rest.substr(0, pos);
-                auto text = rest.substr(pos + 1);
+            string users = "Пользователи онлайн:\n";
+            lock_guard<mutex> guard(sharedMutex);
+            for (const auto& n : nicknames)
+                users += "- " + n + "\n";
 
-                Client* rec = FindClient(target);
-                if (rec && rec->socket != sock)
+            SendToOne(clientSocket, users);
+            continue;
+        }
+
+        if (command.rfind("/private ", 0) == 0)
+        {
+            string args = command.substr(9);
+            size_t split = args.find(' ');
+
+            if (split != string::npos)
+            {
+                string targetName = args.substr(0, split);
+                string privateMsg = args.substr(split + 1);
+
+                int index = GetClientIndex(targetName);
+                if (index >= 0)
                 {
-                    SendOne(rec->socket, "Лично от " + client.name + ": " + text);
-                    SendOne(sock, "Отправлено");
+                    SendToOne(clients[index],
+                        "Лично от " + userName + ": " + privateMsg);
+                    SendToOne(clientSocket, "Сообщение отправлено");
                 }
                 else
-                    SendOne(sock, "Пользователь не найден");
+                {
+                    SendToOne(clientSocket, "Пользователь не найден");
+                }
             }
+            continue;
         }
-        else
-        {
-            SendAll(client.name + ": " + msg, sock);
-        }
+
+        SendToAll(userName + ": " + command, clientSocket);
     }
 
-    string left = client.name + " вышел из чата";
+    string exitMessage = userName + " покинул чат";
 
     {
-        lock_guard<mutex> guard(clientsLock);
-        clients.erase(
-            remove_if(clients.begin(), clients.end(),
-                [&](const Client& c) { return c.socket == sock; }),
-            clients.end()
-        );
+        lock_guard<mutex> guard(sharedMutex);
+        for (size_t i = 0; i < clients.size(); ++i)
+        {
+            if (clients[i] == clientSocket)
+            {
+                closesocket(clientSocket);
+                clients.erase(clients.begin() + i);
+                nicknames.erase(nicknames.begin() + i);
+                break;
+            }
+        }
     }
 
-    closesocket(sock);
-    SendAll(left);
+    SendToAll(exitMessage);
 }
 
 int main()
 {
     setlocale(LC_ALL, "rus");
 
-    WSADATA ws;
-    WSAStartup(MAKEWORD(2, 2), &ws);
+    WSADATA wsa;
+    WSAStartup(MAKEWORD(2, 2), &wsa);
 
-    SOCKET server = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    SOCKET listenSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = INADDR_ANY;
-    addr.sin_port = htons(SERVER_PORT);
+    sockaddr_in serverAddr{};
+    serverAddr.sin_family = AF_INET;
+    serverAddr.sin_port = htons(PORT);
+    serverAddr.sin_addr.s_addr = INADDR_ANY;
 
-    bind(server, (sockaddr*)&addr, sizeof(addr));
-    listen(server, SOMAXCONN);
+    bind(listenSocket, (sockaddr*)&serverAddr, sizeof(serverAddr));
+    listen(listenSocket, SOMAXCONN);
 
-    cout << "Сервер запущен на порту " << SERVER_PORT << endl;
-
+    cout << "Сервер чата запущен. Порт: " << PORT << endl;
     while (true)
     {
-        SOCKET client = accept(server, nullptr, nullptr);
-        if (client != INVALID_SOCKET)
-            thread(ProcessClient, client).detach();
+        sockaddr_in clientAddr{};
+        int addrSize = sizeof(clientAddr);
+        SOCKET newClient = accept(listenSocket, (sockaddr*)&clientAddr, &addrSize);
+
+        if (newClient != INVALID_SOCKET)
+        {
+            cout << "Подключился новый клиент\n";
+            std::thread(ClientThread, newClient).detach();
+        }
     }
 
-    closesocket(server);
+    closesocket(listenSocket);
     WSACleanup();
     return 0;
 }
-
-
-
-
-ПОЧИНЕНАЯ ВЕРСИЯ
-
-
-#include <windows.h>
-#include <winsock2.h>
-#include <iostream>
-#include <vector>
-#include <string>
-#include <thread>
-#include <mutex>
-
-#pragma comment(lib, "ws2_32.lib")
-
-using namespace std;
-
-static const unsigned short SERVER_PORT = 5555;
-static const int MAX_BUF = 1024;
-
-struct Client
-{
-    SOCKET socket;
-    string name;
-};
-
-vector<Client> clients;
-mutex clientsLock;
-
-void SendAll(const string& text, SOCKET skip = INVALID_SOCKET)
-{
-    lock_guard<mutex> guard(clientsLock);
-    cout << text << endl;
-
-    for (auto& c : clients)
-        if (c.socket != skip)
-            send(c.socket, text.c_str(), (int)text.size(), 0);
-}
-
-void SendOne(SOCKET s, const string& text)
-{
-    send(s, text.c_str(), (int)text.size(), 0);
-}
-
-Client* FindClient(const string& name)
-{
-    for (auto& c : clients)
-        if (c.name == name)
-            return &c;
-    return nullptr;
-}
-
-void ProcessClient(SOCKET sock)
-{
-    char buffer[MAX_BUF];
-    int len = recv(sock, buffer, MAX_BUF - 1, 0);
-    if (len <= 0) return;
-
-    buffer[len] = '\0';
-    Client client{ sock, buffer };
-
-    {
-        lock_guard<mutex> guard(clientsLock);
-        clients.push_back(client);
-    }
-
-    SendAll(client.name + " подключился к чату", sock);
-
-    SendOne(sock,
-        "Добро пожаловать!\n"
-        "/private [ник] [сообщение]\n"
-        "/list\n"
-        "/quit\n"
-    );
-
-    bool alive = true;
-    while (alive)
-    {
-        len = recv(sock, buffer, MAX_BUF - 1, 0);
-        if (len <= 0) break;
-
-        buffer[len] = '\0';
-        string msg = buffer;
-
-        if (msg == "/quit")
-            break;
-
-        if (msg == "/list")
-        {
-            string list = "Пользователи:\n";
-            lock_guard<mutex> guard(clientsLock);
-            for (auto& c : clients)
-                list += "• " + c.name + "\n";
-            SendOne(sock, list);
-        }
-        else if (msg.rfind("/private ", 0) == 0)
-        {
-            auto rest = msg.substr(9);
-            auto pos = rest.find(' ');
-            if (pos != string::npos)
-            {
-                auto target = rest.substr(0, pos);
-                auto text = rest.substr(pos + 1);
-
-                Client* rec = FindClient(target);
-                if (rec && rec->socket != sock)
-                {
-                    SendOne(rec->socket, "Лично от " + client.name + ": " + text);
-                    SendOne(sock, "Отправлено");
-                }
-                else
-                    SendOne(sock, "Пользователь не найден");
-            }
-        }
-        else
-        {
-            SendAll(client.name + ": " + msg, sock);
-        }
-    }
-
-    string left = client.name + " вышел из чата";
-
-    {
-        lock_guard<mutex> guard(clientsLock);
-        clients.erase(
-            remove_if(clients.begin(), clients.end(),
-                [&](const Client& c) { return c.socket == sock; }),
-            clients.end()
-        );
-    }
-
-    closesocket(sock);
-    SendAll(left);
-}
-
-int main()
-{
-    setlocale(LC_ALL, "rus");
-    SetConsoleCP(65001);
-    SetConsoleOutputCP(65001);
-
-    WSADATA ws;
-    WSAStartup(MAKEWORD(2, 2), &ws);
-
-    SOCKET server = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = INADDR_ANY;
-    addr.sin_port = htons(SERVER_PORT);
-
-    bind(server, (sockaddr*)&addr, sizeof(addr));
-    listen(server, SOMAXCONN);
-
-    cout << "Сервер запущен на порту " << SERVER_PORT << endl;
-
-    while (true)
-    {
-        SOCKET client = accept(server, nullptr, nullptr);
-        if (client != INVALID_SOCKET)
-            thread(ProcessClient, client).detach();
-    }
-
-    closesocket(server);
-    WSACleanup();
-    return 0;
-}
-
