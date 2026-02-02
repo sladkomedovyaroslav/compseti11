@@ -214,7 +214,6 @@ Client* FindClient(const string& name)
 void ProcessClient(SOCKET sock)
 {
     char buffer[MAX_BUF];
-
     int len = recv(sock, buffer, MAX_BUF - 1, 0);
     if (len <= 0) return;
 
@@ -256,12 +255,12 @@ void ProcessClient(SOCKET sock)
         }
         else if (msg.rfind("/private ", 0) == 0)
         {
-            string rest = msg.substr(9);
+            auto rest = msg.substr(9);
             auto pos = rest.find(' ');
             if (pos != string::npos)
             {
-                string target = rest.substr(0, pos);
-                string text = rest.substr(pos + 1);
+                auto target = rest.substr(0, pos);
+                auto text = rest.substr(pos + 1);
 
                 Client* rec = FindClient(target);
                 if (rec && rec->socket != sock)
@@ -270,9 +269,7 @@ void ProcessClient(SOCKET sock)
                     SendOne(sock, "Отправлено");
                 }
                 else
-                {
                     SendOne(sock, "Пользователь не найден");
-                }
             }
         }
         else
@@ -280,6 +277,8 @@ void ProcessClient(SOCKET sock)
             SendAll(client.name + ": " + msg, sock);
         }
     }
+
+    string left = client.name + " вышел из чата";
 
     {
         lock_guard<mutex> guard(clientsLock);
@@ -291,15 +290,16 @@ void ProcessClient(SOCKET sock)
     }
 
     closesocket(sock);
-    SendAll(client.name + " вышел из чата");
+    SendAll(left);
 }
 
 int main()
 {
-    // UTF-8 для консоли Windows
-    SetConsoleCP(CP_UTF8);
-    SetConsoleOutputCP(CP_UTF8);
-    setlocale(LC_ALL, ".UTF8");
+    // --- FIX RUSSIAN TEXT ---
+    SetConsoleCP(65001);
+    SetConsoleOutputCP(65001);
+    setlocale(LC_ALL, "ru_RU.UTF-8");
+    // -----------------------
 
     WSADATA ws{};
     WSAStartup(MAKEWORD(2, 2), &ws);
