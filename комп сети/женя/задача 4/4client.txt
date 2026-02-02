@@ -111,8 +111,8 @@ int main()
 
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
 
-#include <winsock2.h>
 #include <windows.h>
+#include <winsock2.h>
 #include <iostream>
 #include <string>
 #include <thread>
@@ -153,11 +153,9 @@ void ServerReader()
 
 int main()
 {
-    // --- FIX RUSSIAN TEXT ---
+    setlocale(LC_ALL, "rus");
     SetConsoleCP(65001);
     SetConsoleOutputCP(65001);
-    setlocale(LC_ALL, "ru_RU.UTF-8");
-    // -----------------------
 
     WSADATA ws{};
     if (WSAStartup(MAKEWORD(2, 2), &ws) != 0)
@@ -212,6 +210,6 @@ int main()
     reader.join();
     closesocket(g_socket);
     WSACleanup();
+
     return 0;
 }
-
