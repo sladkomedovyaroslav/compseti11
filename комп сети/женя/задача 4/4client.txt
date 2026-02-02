@@ -109,7 +109,6 @@ int main()
 
 
 
-
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
 
 #include <winsock2.h>
@@ -121,14 +120,17 @@ int main()
 
 #pragma comment(lib, "ws2_32.lib")
 
-using namespace std;
+using std::cout;
+using std::cin;
+using std::endl;
+using std::string;
 
 static const char* SERVER_ADDR = "127.0.0.1";
 static const unsigned short SERVER_PORT = 5555;
 static const int MAX_BUF = 1024;
 
 SOCKET g_socket = INVALID_SOCKET;
-atomic<bool> g_connected(true);
+std::atomic<bool> g_connected(true);
 
 void ServerReader()
 {
@@ -151,10 +153,11 @@ void ServerReader()
 
 int main()
 {
-    // UTF-8 для консоли Windows
-    SetConsoleCP(CP_UTF8);
-    SetConsoleOutputCP(CP_UTF8);
-    setlocale(LC_ALL, ".UTF8");
+    // --- FIX RUSSIAN TEXT ---
+    SetConsoleCP(65001);
+    SetConsoleOutputCP(65001);
+    setlocale(LC_ALL, "ru_RU.UTF-8");
+    // -----------------------
 
     WSADATA ws{};
     if (WSAStartup(MAKEWORD(2, 2), &ws) != 0)
@@ -175,7 +178,7 @@ int main()
     server.sin_port = htons(SERVER_PORT);
     server.sin_addr.s_addr = inet_addr(SERVER_ADDR);
 
-    cout << "Подключение к серверу...\n";
+    cout << "Подключение...\n";
     if (connect(g_socket, (sockaddr*)&server, sizeof(server)) != 0)
     {
         cout << "Сервер недоступен\n";
@@ -185,9 +188,9 @@ int main()
     cout << "Введите ник: ";
     string nick;
     getline(cin, nick);
-    send(g_socket, nick.c_str(), (int)nick.size(), 0);
+    send(g_socket, nick.c_str(), (int)nick.length(), 0);
 
-    thread reader(ServerReader);
+    std::thread reader(ServerReader);
 
     while (g_connected)
     {
@@ -203,7 +206,7 @@ int main()
         }
 
         if (!input.empty())
-            send(g_socket, input.c_str(), (int)input.size(), 0);
+            send(g_socket, input.c_str(), (int)input.length(), 0);
     }
 
     reader.join();
@@ -211,5 +214,4 @@ int main()
     WSACleanup();
     return 0;
 }
-
 
