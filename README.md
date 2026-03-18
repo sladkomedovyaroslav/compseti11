@@ -2,45 +2,45 @@
 #include <vector>
 #include <cstdlib>
 #include <omp.h>
-
+#include <ctime>
 using namespace std;
 
-void shellSort(vector<int>& arr) {
-    int n = arr.size();
+void shellSort(vector<int>& arr) { // фунция сортировки шелла
+    int n = arr.size(); // колво элем в массиве
 
-    for (int gap = n / 2; gap > 0; gap /= 2) {
+    for (int gap = n / 2; gap > 0; gap /= 2) { //основной цикл
 
-        // Параллелим независимые группы
+        
         #pragma omp parallel for
-        for (int start = 0; start < gap; start++) {
+        for (int start = 0; start < gap; start++) { //формируем независимых последователностей элементов которые можно сортировать одновременно 
 
-            for (int i = start + gap; i < n; i += gap) {
-                int temp = arr[i];
+            for (int i = start + gap; i < n; i += gap) { //идет по элементам текущей последовательности увеличиваем индекс 
+                int temp = arr[i]; // сохраняем текущий элемент 
                 int j = i;
 
-                while (j >= gap && arr[j - gap] > temp) {
-                    arr[j] = arr[j - gap];
-                    j -= gap;
+                while (j >= gap && arr[j - gap] > temp) { //сортировка по шагу гап 
+                    arr[j] = arr[j - gap]; //если предыдущий элем больше темп сдвигаем его на гап вправо 
+                    j -= gap; //идем к след элементу 
                 }
-                arr[j] = temp;
+                arr[j] = temp; //ставим элемент на правильное место
             }
         }
     }
 }
 
 int main() {
-    int n = 10000; // >= 1000
+    srand(time(0));
+    int n = 10000; 
     vector<int> arr(n);
-
-    // Заполнение массива случайными числами
+    
     for (int i = 0; i < n; i++) {
         arr[i] = rand() % 10000;
     }
 
-    // Установка количества потоков (можешь менять)
-    omp_set_num_threads(4);
+   
+    omp_set_num_threads(4); //задаем колво потоков 
 
-    double start = omp_get_wtime();
+    double start = omp_get_wtime(); //засекаем время 
 
     shellSort(arr);
 
@@ -48,8 +48,8 @@ int main() {
 
     cout << "Time: " << end - start << " seconds" << endl;
 
-    // Проверка (первые 10 элементов)
-    for (int i = 0; i < 10; i++) {
+    
+    for (int i = 0; i < 10; i++) { //проверка сортировки
         cout << arr[i] << " ";
     }
     cout << endl;
